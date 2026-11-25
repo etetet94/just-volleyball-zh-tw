@@ -1,0 +1,32 @@
+# Local authoring, generated releases, and editor files
+work/
+outputs/
+dist/
+.git/
+.godot/
+__pycache__/
+*.py[cod]
+.DS_Store
+Thumbs.db
+
+# Local installation state and private configuration
+override.cfg
+**/backup/
+**/install-info.json
+**/jv_zh_tw.staging.*/
+**/jv_zh_tw.rollback.*/
+*.log
+*.tmp
+*.bak
+*-stdout.txt
+*-stderr.txt
+.env
+.env.*
+*.pem
+*.key
+
+# Never commit game binaries or original resource packs
+*.exe
+*.dll
+*.pck
+!jv_zh_tw/guide_zhTW.pck

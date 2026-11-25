@@ -1,0 +1,37 @@
+﻿just volleyball 繁體中文模組
+
+適用遊戲：Steam app 5037200，製作時安裝的 Build 26924091。
+目前包含 1,598 組介面翻譯，以及完整玩法指南文字。涵蓋主選單、設定、基本教學、更衣室、商店、比賽 HUD、生涯、成就與重播；部分物品專有名稱與特殊動態訊息可能仍保留英文。
+使用 Windows 既有的微軟正黑體補足中文字，不需另外安裝字型。
+遊戲更新後可能新增未翻譯文字，或改變介面行為；請以實際畫面為準。
+
+安裝
+1. 完全關閉遊戲。
+2. 將整個 ZIP 解壓縮到一般可寫入的資料夾，不要只從 ZIP 內執行單一檔案。
+3. 按兩下 Install.cmd。安裝程式會尋找 Steam 遊戲目錄。
+4. 看到安裝完成後，照常從 Steam 啟動遊戲。
+
+若找不到遊戲，可在此資料夾開啟 PowerShell 並執行：
+powershell -ExecutionPolicy Bypass -File .\Setup.ps1 -GameDir "C:\你的Steam資料庫\steamapps\common\just volleyball"
+
+移除／恢復原文
+1. 完全關閉遊戲。
+2. 按兩下 Uninstall.cmd；不需要先開遊戲。
+3. 再從 Steam 啟動。翻譯檔和原始設定備份會保留，但模組不再載入。
+自訂路徑移除：
+powershell -ExecutionPolicy Bypass -File .\Setup.ps1 -Action Uninstall -GameDir "你的遊戲目錄"
+
+線上模式說明
+這是純文字與字型在地化模組，不封鎖線上介面。官方線上條款第 3 條禁止在線上遊玩時修改遊戲，目前沒有確認語言模組是否獲得豁免。需要恢復原版時，關閉遊戲並執行 Uninstall.cmd。
+https://store.steampowered.com/eula/5037200_eula_0
+
+變更與備份
+模組新增 jv_zh_tw 資料夾，並在 override.cfg 的 [autoload] 加入 JVTraditionalChinese。
+原有設定與其他模組的項目會保留；首次安裝前的 override.cfg 備份放在 jv_zh_tw\backup。
+移除時只停用本模組的載入項目，不以過期備份覆蓋後來的設定，也不修改遊戲存檔。
+安裝包不含遊戲主程式，不需下載或執行第三方漢化切換器。
+
+遇到問題
+遊戲更新後若出現異常，先關閉遊戲並執行 Uninstall.cmd，再確認原版是否正常。
+若安裝顯示權限不足，可在 Windows 以系統管理員身分執行 Install.cmd。
+此為非官方模組；未宣稱所有文字、畫面與操作均已完整測試。
