@@ -2,7 +2,7 @@
 
 適用於 [just volleyball 的 Windows Steam 版](https://store.steampowered.com/app/5037200/just_volleyball/)，提供繁體中文介面與玩法指南。這是社群製作的非官方模組。
 
-**[下載最新安裝包](https://github.com/etetet94/just-volleyball-zh-tw/releases/latest)**
+**[下載最新安裝包](https://github.com/etetet94/just-volleyball-zh-tw/raw/refs/heads/main/downloads/JustVolleyball-zhTW-v1.0.1.zip)**
 
 目前包含 **1,620 組翻譯**，涵蓋主選單、設定、基本教學、更衣室、商店、比賽介面、生涯、成就與重播。模組使用 Windows 上的中文字型作為原字型的後備字型。
 
@@ -18,7 +18,7 @@
 安裝包不需要 Python 或 Godot 編輯器。
 
 1. 先在 Steam 安裝遊戲，並完全關閉遊戲。
-2. 到上方發行頁，下載 `JustVolleyball-zhTW-v*.zip`。
+2. 點選上方下載連結，取得 `JustVolleyball-zhTW-v*.zip`。
 3. **完整解壓縮 ZIP** 到一般可寫入的資料夾；不要直接在壓縮檔內執行。
 4. 按兩下 **`Install.cmd`**。安裝程式會自動尋找 Steam 遊戲目錄。
 5. 顯示安裝完成後，照常從 Steam 啟動遊戲。
