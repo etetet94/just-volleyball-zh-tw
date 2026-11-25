@@ -4,7 +4,14 @@
 
 **[下載最新安裝包](https://github.com/etetet94/just-volleyball-zh-tw/releases/latest)**
 
-目前包含 **1,598 組翻譯**，涵蓋主選單、設定、基本教學、更衣室、商店、比賽介面、生涯、成就與重播。模組使用 Windows 上的中文字型作為原字型的後備字型。
+目前包含 **1,620 組翻譯**，涵蓋主選單、設定、基本教學、更衣室、商店、比賽介面、生涯、成就與重播。模組使用 Windows 上的中文字型作為原字型的後備字型。
+
+## v1.0.1 補譯
+
+- 補上練習場的個人／共用排球、無限體力、球路提示、玩家碰撞與 1 對 1～6 對 6 標示。
+- 修正右側操作提示被誤判為玩家名稱，導致已有翻譯仍顯示英文的問題。
+- 完整翻譯解除滑鼠鎖定、視角、召喚排球、接球、舉球、魚躍救球、跳躍、側移與衝刺等提示；保留按鍵圖示。
+- 沿用玩家名稱與聊天輸入保護，不變更玩法數值或連線功能。
 
 ## 安裝
 
@@ -78,10 +85,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Setup.ps1 -Action Unin
 
 ```powershell
 python scripts/build_guide_pack.py
-python scripts/build_release.py --version v1.0.0
+python scripts/build_release.py --version v1.0.1
 ```
 
-輸出為 `dist/JustVolleyball-zhTW-v1.0.0.zip` 與 `dist/SHA256SUMS.txt`。相同輸入檔案會產生相同的指南 PCK 和安裝 ZIP。
+輸出為 `dist/JustVolleyball-zhTW-v1.0.1.zip` 與 `dist/SHA256SUMS.txt`。相同輸入檔案會產生相同的指南 PCK 和安裝 ZIP。
 
 | 檔案 | 用途 |
 | --- | --- |

@@ -134,6 +134,17 @@ func _is_identity(node: Node) -> bool:
 	# Never rewrite user text boxes, player-name labels, or the chat display.
 	if node is LineEdit or node is TextEdit:
 		return true
+	# ControlHints names its static action captions "Name" and has a "Chat"
+	# action row. These are game labels, not player names or chat messages.
+	if node is Label and str(node.name).to_lower() == "name":
+		var owner = node
+		for depth in 10:
+			if owner == null:
+				break
+			var script = owner.get_script()
+			if script != null and script.resource_path in ["res://game/ui/control_hints.gd", "res://game/ui/control_hints.gdc"]:
+				return false
+			owner = owner.get_parent()
 	var current = node
 	for depth in 5:
 		if current == null:

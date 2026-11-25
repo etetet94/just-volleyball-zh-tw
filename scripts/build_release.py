@@ -67,7 +67,7 @@ def build_release(version: str, output_dir: Path) -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--version", default="v1.0.0")
+    parser.add_argument("--version", default="v1.0.1")
     parser.add_argument("--output-dir", type=Path, default=ROOT / "dist")
     args = parser.parse_args()
     target = build_release(args.version, args.output_dir)
