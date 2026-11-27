@@ -95,7 +95,13 @@ jobs:
             fi
           done < release-assets.txt
 
-          gh api "repos/$GH_REPO/releases/tags/$TAG" > release-before-publish.json
+          gh api "repos/$GH_REPO/releases?per_page=100" > release-list.json
+          python3 - <<'PY'
+          import json,os,pathlib
+          matches=[r for r in json.loads(pathlib.Path('release-list.json').read_text()) if r.get('tag_name')==os.environ['TAG']]
+          assert len(matches)==1
+          pathlib.Path('release-before-publish.json').write_text(json.dumps(matches[0]),encoding='utf-8')
+          PY
           python3 - <<'PY'
           import hashlib,json,os,pathlib
           release=json.loads(pathlib.Path('release-before-publish.json').read_text())
