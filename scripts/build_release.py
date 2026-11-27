@@ -20,9 +20,16 @@ FILES = (
     "Setup.ps1",
     "使用說明.txt",
     "README.md",
+    "CHANGELOG.md",
+    "docs/VALIDATION-v1.1.1.md",
     "LICENSE",
     "NOTICE.md",
     "jv_zh_tw/localize.gd",
+    "jv_zh_tw/settings_panel.gd",
+    "jv_zh_tw/match_extras.gd",
+    "jv_zh_tw/impact_glyph.gd",
+    "jv_zh_tw/effect_preview.gd",
+    "jv_zh_tw/topple_stats.gd",
     "jv_zh_tw/translations.json",
     "jv_zh_tw/guide_zhTW.pck",
     "jv_zh_tw/package-id.txt",
@@ -67,7 +74,7 @@ def build_release(version: str, output_dir: Path) -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--version", default="v1.0.1")
+    parser.add_argument("--version", default="v1.1.1")
     parser.add_argument("--output-dir", type=Path, default=ROOT / "dist")
     args = parser.parse_args()
     target = build_release(args.version, args.output_dir)

@@ -175,14 +175,19 @@ try {
     $manifestPath = Join-Path (Split-Path (Split-Path $GameDir -Parent) -Parent) 'appmanifest_5037200.acf'
     if (Test-Path -LiteralPath $manifestPath) {
         $build = [regex]::Match([IO.File]::ReadAllText($manifestPath),'"buildid"\s+"([0-9]+)"')
-        if ($build.Success -and $build.Groups[1].Value -ne '26924091') {
-            Write-Host ('提醒：目前 Build '+$build.Groups[1].Value+'，與製作時的 26924091 不同；更新後可能出現未翻譯文字。')
+        if ($build.Success -and $build.Groups[1].Value -ne '26937150') {
+            Write-Host ('提醒：目前 Build '+$build.Groups[1].Value+'，與此版驗證的 26937150 不同；可能需要相容性檢查。')
         }
     }
 
     $source = Join-Path $PSScriptRoot $modName
     if (-not (Test-Path -LiteralPath (Join-Path $source 'localize.gd')) -or
-        -not (Test-Path -LiteralPath (Join-Path $source 'translations.json'))) {
+        -not (Test-Path -LiteralPath (Join-Path $source 'translations.json')) -or
+        -not (Test-Path -LiteralPath (Join-Path $source 'settings_panel.gd')) -or
+        -not (Test-Path -LiteralPath (Join-Path $source 'match_extras.gd')) -or
+        -not (Test-Path -LiteralPath (Join-Path $source 'impact_glyph.gd')) -or
+        -not (Test-Path -LiteralPath (Join-Path $source 'effect_preview.gd')) -or
+        -not (Test-Path -LiteralPath (Join-Path $source 'topple_stats.gd'))) {
         throw '安裝包不完整，請先完整解壓縮所有檔案。'
     }
     if ((Test-Path -LiteralPath $target) -and -not $owned) {
@@ -250,7 +255,7 @@ try {
                 $addedBlock = ([string]$originalInfo.AddedSectionBlock).Replace($oldLine,$line)
             }
         } else { $hadCfgBefore = $cfg.Exists }
-        @{ PackageId=$packageId; HadConfig=$hadCfgBefore; AddedSectionBlock=$addedBlock; HeaderWithoutNewline=$headerWithoutNewline; InstalledUtc=[DateTime]::UtcNow.ToString('o'); TestedBuild='26924091' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $staging 'install-info.json') -Encoding UTF8
+        @{ PackageId=$packageId; HadConfig=$hadCfgBefore; AddedSectionBlock=$addedBlock; HeaderWithoutNewline=$headerWithoutNewline; InstalledUtc=[DateTime]::UtcNow.ToString('o'); TestedBuild='26937150'; ModVersion='1.1.1' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $staging 'install-info.json') -Encoding UTF8
         if ($hadTarget) { Move-Item -LiteralPath $target -Destination $rollback; $movedOld=$true }
         Move-Item -LiteralPath $staging -Destination $target
         $newTargetPlaced=$true

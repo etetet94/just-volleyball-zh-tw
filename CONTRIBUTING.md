@@ -22,7 +22,7 @@
 
 ```powershell
 python scripts/build_guide_pack.py
-python scripts/build_release.py --version v1.0.0
+python scripts/build_release.py --version v1.1.1
 ```
 
 `build_release.py` 會檢查翻譯格式參數、重建指南 PCK，並只將明確列入清單的模組檔案打包到 `dist/`。請勿手動修改產生的 PCK。
