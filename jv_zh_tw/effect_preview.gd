@@ -9,12 +9,22 @@ var _next_spawn: int = 0
 var _card: PanelContainer
 var _surface: TextureRect
 var _previous_focus: WeakRef
-const NAMES = {"ring": "光環衝擊", "star": "星芒爆發", "comic": "漫畫撞擊", "fire": "火焰爆發", "ice": "冰雪碎晶", "electric": "雷電衝擊"}
+var _trail_mode := true
+var _preview_style := "ring"
+var _preview_ball: Node3D
+var _trail_manager: Node
+var _started_msec := 0
+const NAMES = {"off": "關閉", "ring": "光環衝擊", "star": "星芒爆發", "comic": "漫畫撞擊", "fire": "火焰爆發", "ice": "冰雪碎晶", "electric": "雷電衝擊", "portal": "終界珍珠風格", "enchant": "附魔符文"}
 
 func _ready() -> void:
 	set_meta("jv_mod_ui", true)
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	layer = 120
+	# Earlier hit/trail callers now preview the same paired presentation.
+	options = options.duplicate(true)
+	_preview_style = str(options.get("hit_effect", "ring"))
+	options.trail_effect = _preview_style if bool(options.get("trail_enabled", true)) else "off"
+	_started_msec = Time.get_ticks_msec()
 	_glyph_script = load(get_script().resource_path.get_base_dir().path_join("impact_glyph.gd"))
 	var overlay = Control.new()
 	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -39,7 +49,7 @@ func _ready() -> void:
 	box.add_theme_constant_override("separation", 12)
 	_card.add_child(box)
 	var title = Label.new()
-	title.text = "特效預覽：" + str(NAMES.get(options.get("hit_effect", "ring"), "光環衝擊"))
+	title.text = "整組效果預覽：" + str(NAMES.get(_preview_style, "光環衝擊"))
 	title.add_theme_color_override("font_color", Color("ffe06a"))
 	title.add_theme_font_size_override("font_size", 22)
 	box.add_child(title)
@@ -64,11 +74,12 @@ func _ready() -> void:
 	_surface.resized.connect(_resize_world)
 	var camera = Camera3D.new()
 	_world.add_child(camera)
-	camera.position = Vector3(0, 0, 3.5)
+	camera.position = Vector3(0, 0, 3.0)
 	camera.fov = 45
 	camera.current = true
+	_build_trail_preview()
 	var caption = Label.new()
-	caption.text = "依目前風格與強度顯示，對局中會在擊球位置出現。"
+	caption.text = "同一主題的擊打與球跡，會隨著示範球一起顯示。" if bool(options.get("trail_enabled", true)) else "球跡已關閉；示範球會呈現目前的擊打特效。"
 	caption.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	caption.add_theme_font_size_override("font_size", 14)
 	caption.add_theme_color_override("font_color", Color("afbdcd"))
@@ -84,6 +95,46 @@ func _ready() -> void:
 	_previous_focus = weakref(focused) if is_instance_valid(focused) else null
 	close.grab_focus()
 	call_deferred("_resize_world")
+
+func _build_trail_preview() -> void:
+	_preview_ball = Node3D.new()
+	_preview_ball.name = "PreviewBall"
+	_world.add_child(_preview_ball)
+	var sphere = MeshInstance3D.new()
+	var mesh = SphereMesh.new()
+	mesh.radius = 0.115
+	mesh.height = 0.23
+	mesh.radial_segments = 24
+	mesh.rings = 12
+	sphere.mesh = mesh
+	var material = StandardMaterial3D.new()
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.albedo_color = Color("d9edff")
+	sphere.material_override = material
+	_preview_ball.add_child(sphere)
+	for rotation in [Vector3.ZERO, Vector3(PI * 0.5, 0, 0)]:
+		var band = MeshInstance3D.new()
+		var ring = TorusMesh.new()
+		ring.inner_radius = 0.109
+		ring.outer_radius = 0.12
+		ring.rings = 24
+		ring.ring_segments = 8
+		band.mesh = ring
+		var band_material = StandardMaterial3D.new()
+		band_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		band_material.albedo_color = Color("ffe06a")
+		band.material_override = band_material
+		band.rotation = rotation
+		_preview_ball.add_child(band)
+	var path = get_script().resource_path.get_base_dir().path_join("ball_trails.gd")
+	if FileAccess.file_exists(path):
+		var script = load(path)
+		if script != null:
+			_trail_manager = script.new()
+			_trail_manager.preview_only = true
+			_world.add_child(_trail_manager)
+			_trail_manager.configure(options)
+			_trail_manager.attach_preview_ball(_preview_ball)
 
 func _resize_world() -> void:
 	if is_instance_valid(_world) and is_instance_valid(_surface):
@@ -101,16 +152,22 @@ func _process(_delta: float) -> void:
 	# layout. Reapply the bounded card size so an early large minimum cannot
 	# leave it stretched beyond the window after that minimum becomes smaller.
 	_fit()
+	if _trail_mode:
+		if is_instance_valid(_preview_ball):
+			var time = float(Time.get_ticks_msec() - _started_msec) / 1000.0
+			_preview_ball.position = Vector3(sin(time * 2.1) * 1.55, sin(time * 4.2) * 0.46, 0)
+			_preview_ball.rotation = Vector3(time * 1.4, time * 2.2, time * 0.6)
 	if _glyph_script == null or _world == null: return
+	if _preview_style == "off": return
 	var now = Time.get_ticks_msec()
 	if now < _next_spawn: return
 	_next_spawn = now + 850
 	var glyph = _glyph_script.new()
-	glyph.style = str(options.get("hit_effect", "ring"))
+	glyph.style = _preview_style
 	glyph.strength = float(options.get("effect_intensity", 0.65))
 	glyph.tint = Color("79baff")
 	_world.add_child(glyph)
-	glyph.position = Vector3.ZERO
+	glyph.position = _preview_ball.position if is_instance_valid(_preview_ball) else Vector3.ZERO
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and (event.keycode in [KEY_ESCAPE, KEY_F8] or event.physical_keycode in [KEY_ESCAPE, KEY_F8]):

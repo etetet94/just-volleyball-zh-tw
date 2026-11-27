@@ -1,1 +1,4 @@
-c7589fc678735c32051993f09b28d5e27c9138a55e91b7d6a7b027d66e3cdcd5  JustVolleyball-zhTW-v1.1.1.zip
+467d5e0b8aafba8bbb630565e24c3809e64e7dd764e9fc882f7b3bcd100ec17e  JustVolleyball-zhTW-v1.2.1.zip
+ef2e98c071c74efcf8387544fa831fcf69a3402440e8a1c37433732eed3d0a29  JustVolleyball-zhTW-v1.2.1-Promo.mp4
+519775c0afe691f6243fb7e822a350c82c4fc67a36879acbd30b5057ab53662e  Promo-Cover.png
+4f2f2ab6990f122534d89de65cca34b4b4b5c3f733f221b7ccb0ca838e7dd224  JustVolleyball-zhTW-v1.2.1-Clips.zip

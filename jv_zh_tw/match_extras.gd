@@ -40,7 +40,7 @@ func configure(options: Dictionary) -> void:
 	for key in ["hit_effect", "effect_intensity", "fun_stats"]:
 		if options.has(key):
 			_options[key] = options[key]
-	if not str(_options.hit_effect) in ["off", "ring", "star", "comic", "fire", "ice", "electric"]:
+	if not str(_options.hit_effect) in ["off", "ring", "star", "comic", "fire", "ice", "electric", "portal", "enchant"]:
 		_options.hit_effect = "ring"
 	_options.effect_intensity = clampf(float(_options.effect_intensity), 0.2, 1.0)
 	if _options.hit_effect == "off":
@@ -78,7 +78,11 @@ func _scan(node: Node) -> void:
 		_scan(child)
 
 func _on_node_added(node: Node) -> void:
-	call_deferred("_bind", node)
+	call_deferred("_bind_reference", weakref(node))
+
+func _bind_reference(reference: WeakRef) -> void:
+	var node = reference.get_ref()
+	if is_instance_valid(node): _bind(node)
 
 func _bind(node: Node) -> void:
 	if not is_instance_valid(node):
@@ -243,7 +247,7 @@ func _trim_event_history() -> void:
 	if _freeplay_seen.size() > 128:
 		_freeplay_seen.clear()
 
-func _spawn_impact(parent: Node, pos: Vector3, power: float, kind: int) -> bool:
+func _spawn_impact(parent: Node, pos: Vector3, power: float, _kind: int) -> bool:
 	if _options.hit_effect == "off" or DisplayServer.get_name() == "headless" or _impact_script == null:
 		return false
 	if not is_instance_valid(parent) or not parent.is_inside_tree():
@@ -254,7 +258,8 @@ func _spawn_impact(parent: Node, pos: Vector3, power: float, kind: int) -> bool:
 	var effect = _impact_script.new()
 	effect.style = str(_options.hit_effect)
 	effect.strength = float(_options.effect_intensity) * clampf(0.7 + power * 0.3, 0.7, 1.0)
-	effect.tint = Color("ffd344") if kind in [3, 4] else Color("58dbd0") if kind == 1 else Color("79baff")
+	# Keep the selected theme's palette consistent with its paired ball trail.
+	effect.tint = Color("79baff")
 	parent.add_child(effect)
 	effect.global_position = pos
 	_effects.append(weakref(effect))

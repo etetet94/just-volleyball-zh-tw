@@ -4,16 +4,20 @@ extends CanvasLayer
 signal settings_changed(options: Dictionary)
 signal panel_visibility_changed(open: bool)
 signal effect_preview_requested()
+signal trail_preview_requested()
 
 const CONFIG_PATH = "user://jv_zh_tw/preferences.cfg"
-const EFFECT_KEYS = ["off", "ring", "star", "comic", "fire", "ice", "electric"]
-const EFFECT_LABELS = ["關閉", "光環衝擊", "星芒爆發", "漫畫撞擊", "火焰爆發", "冰雪碎晶", "雷電衝擊"]
+const EFFECT_KEYS = ["off", "ring", "star", "comic", "fire", "ice", "electric", "portal", "enchant"]
+const EFFECT_LABELS = ["關閉", "光環衝擊", "星芒爆發", "漫畫撞擊", "火焰爆發", "冰雪碎晶", "雷電衝擊", "終界珍珠風格", "附魔符文"]
 const DEFAULTS = {
 	"font_weight": "bold",
 	"font_scale": 1.0,
 	"high_contrast": true,
 	"hit_effect": "ring",
 	"effect_intensity": 0.65,
+	"trail_enabled": true,
+	"trail_intensity": 0.65,
+	"trail_lifetime": 0.45,
 	"fun_stats": true,
 }
 const INPUT_ACTIONS = ["move_forward", "move_back", "move_left", "move_right", "aim_left", "aim_right", "aim_up", "aim_down", "jump", "contact", "set", "dive", "block", "serve", "strafe", "aim_recenter", "sprint"]
@@ -30,6 +34,12 @@ var _effect: OptionButton
 var _intensity: HSlider
 var _intensity_value: Label
 var _preview: Button
+var _trail_style: Label
+var _trail_enabled: CheckButton
+var _trail_intensity: HSlider
+var _trail_intensity_value: Label
+var _trail_lifetime: HSlider
+var _trail_lifetime_value: Label
 var _fun: CheckButton
 var _status: Label
 var _previous_mouse_mode: int = Input.MOUSE_MODE_VISIBLE
@@ -54,7 +64,9 @@ func _ready() -> void:
 	_fit_panel()
 
 func get_options() -> Dictionary:
-	return _options.duplicate(true)
+	var options = _options.duplicate(true)
+	options["trail_effect"] = str(_options.hit_effect) if bool(_options.trail_enabled) else "off"
+	return options
 
 func is_open() -> bool:
 	return is_instance_valid(_overlay) and _overlay.visible
@@ -79,14 +91,19 @@ func _normalize(key: String, value: Variant) -> Variant:
 				var number = float(value)
 				return roundf(clampf(number, 1.0, 1.2) * 20.0) / 20.0 if is_finite(number) else DEFAULTS[key]
 			return DEFAULTS[key]
-		"effect_intensity":
+		"effect_intensity", "trail_intensity":
 			if value is float or value is int:
 				var number = float(value)
 				return roundf(clampf(number, 0.2, 1.0) * 20.0) / 20.0 if is_finite(number) else DEFAULTS[key]
 			return DEFAULTS[key]
 		"hit_effect":
 			return str(value) if str(value) in EFFECT_KEYS else DEFAULTS[key]
-		"high_contrast", "fun_stats":
+		"trail_lifetime":
+			if value is float or value is int:
+				var number = float(value)
+				return roundf(clampf(number, 0.15, 0.9) * 20.0) / 20.0 if is_finite(number) else DEFAULTS[key]
+			return DEFAULTS[key]
+		"high_contrast", "fun_stats", "trail_enabled":
 			return value if value is bool else DEFAULTS[key]
 	return DEFAULTS[key]
 
@@ -96,6 +113,8 @@ func _load_options() -> void:
 		return
 	for key in DEFAULTS:
 		_options[key] = _normalize(key, config.get_value("presentation", key, DEFAULTS[key]))
+	if not config.has_section_key("presentation", "trail_enabled") and config.get_value("presentation", "trail_effect", "") == "off":
+		_options.trail_enabled = false
 
 func _save_options() -> void:
 	var directory = ProjectSettings.globalize_path("user://jv_zh_tw")
@@ -245,12 +264,12 @@ func _build_ui() -> void:
 	_contrast.toggled.connect(func(value): set_option("high_contrast", value))
 	rows.add_child(_contrast)
 	rows.add_child(HSeparator.new())
-	rows.add_child(_label("擊打特效與趣味統計", 19, Color("ffe06a")))
+	rows.add_child(_label("擊打與球跡", 19, Color("ffe06a")))
 	_effect = OptionButton.new()
 	for text in EFFECT_LABELS:
 		_effect.add_item(text)
 	_effect.item_selected.connect(func(index): set_option("hit_effect", EFFECT_KEYS[index]))
-	_add_row(rows, "擊打特效", _effect)
+	_add_row(rows, "特效主題（擊打＋球跡）", _effect)
 	var intensity_box = HBoxContainer.new()
 	_intensity = HSlider.new()
 	_intensity.min_value = 0.2
@@ -265,15 +284,53 @@ func _build_ui() -> void:
 	_intensity_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	intensity_box.add_child(_intensity_value)
 	_add_row(rows, "特效強度", intensity_box)
-	_preview = _button("預覽特效")
-	_preview.tooltip_text = "播放目前選擇的特效，不會關閉設定面板。"
+	_preview = _button("預覽整組效果")
+	_preview.tooltip_text = "以移動示範球預覽同一主題的擊打特效與球跡。"
 	_preview.pressed.connect(func(): effect_preview_requested.emit())
 	_add_row(rows, "效果預覽", _preview)
+	rows.add_child(HSeparator.new())
+	rows.add_child(_label("球的軌跡", 19, Color("ffe06a")))
+	_trail_enabled = CheckButton.new()
+	_trail_enabled.text = "開啟搭配的球跡"
+	_trail_enabled.toggled.connect(func(value): set_option("trail_enabled", value))
+	rows.add_child(_trail_enabled)
+	_trail_style = _label("光環衝擊", 17, Color("afbdcd"))
+	_add_row(rows, "目前搭配", _trail_style)
+	var trail_intensity_box = HBoxContainer.new()
+	_trail_intensity = HSlider.new()
+	_trail_intensity.min_value = 0.2
+	_trail_intensity.max_value = 1.0
+	_trail_intensity.step = 0.05
+	_trail_intensity.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_trail_intensity.custom_minimum_size.x = 140
+	_trail_intensity.value_changed.connect(func(value): set_option("trail_intensity", value))
+	trail_intensity_box.add_child(_trail_intensity)
+	_trail_intensity_value = _label("65%", 17)
+	_trail_intensity_value.custom_minimum_size.x = 54
+	_trail_intensity_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	trail_intensity_box.add_child(_trail_intensity_value)
+	_add_row(rows, "球跡強度", trail_intensity_box)
+	var trail_lifetime_box = HBoxContainer.new()
+	_trail_lifetime = HSlider.new()
+	_trail_lifetime.min_value = 0.15
+	_trail_lifetime.max_value = 0.9
+	_trail_lifetime.step = 0.05
+	_trail_lifetime.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_trail_lifetime.custom_minimum_size.x = 140
+	_trail_lifetime.value_changed.connect(func(value): set_option("trail_lifetime", value))
+	trail_lifetime_box.add_child(_trail_lifetime)
+	_trail_lifetime_value = _label("0.45 秒", 17)
+	_trail_lifetime_value.custom_minimum_size.x = 76
+	_trail_lifetime_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	trail_lifetime_box.add_child(_trail_lifetime_value)
+	_add_row(rows, "殘留時間", trail_lifetime_box)
+	rows.add_child(HSeparator.new())
+	rows.add_child(_label("趣味統計", 19, Color("ffe06a")))
 	_fun = CheckButton.new()
 	_fun.text = "結算顯示所有玩家的撲倒次數"
 	_fun.toggled.connect(func(value): set_option("fun_stats", value))
 	rows.add_child(_fun)
-	var hint = _label("特效為本機視覺呈現；趣味統計由本機觀察記錄。", 14, Color("a2b4c6"))
+	var hint = _label("擊打特效與球跡只影響本機畫面；連線趣味統計由房主同步。", 14, Color("a2b4c6"))
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	rows.add_child(hint)
 
@@ -282,7 +339,7 @@ func _build_ui() -> void:
 	content.add_child(_status)
 	var footer = HBoxContainer.new()
 	content.add_child(footer)
-	var version = _label("模組 v1.1.1  ·  遊戲 v1.0.4.3", 14, Color("9fb0bf"))
+	var version = _label("模組 v1.2.1  ·  遊戲 v1.0.4.3", 14, Color("9fb0bf"))
 	version.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	footer.add_child(version)
 	var reset = _button("恢復預設")
@@ -315,6 +372,17 @@ func _refresh_controls() -> void:
 	_intensity.editable = _options.hit_effect != "off"
 	_intensity.modulate.a = 1.0 if _intensity.editable else 0.45
 	_preview.disabled = _options.hit_effect == "off"
+	_trail_enabled.set_pressed_no_signal(_options.trail_enabled)
+	_trail_style.text = EFFECT_LABELS[EFFECT_KEYS.find(_options.hit_effect)] if _options.trail_enabled else "球跡已關閉"
+	_trail_intensity.set_value_no_signal(_options.trail_intensity)
+	_trail_intensity_value.text = "%d%%" % roundi(_options.trail_intensity * 100)
+	_trail_lifetime.set_value_no_signal(_options.trail_lifetime)
+	_trail_lifetime_value.text = "%.2f 秒" % _options.trail_lifetime
+	var trails_enabled = bool(_options.trail_enabled) and _options.hit_effect != "off"
+	_trail_intensity.editable = trails_enabled
+	_trail_lifetime.editable = trails_enabled
+	_trail_intensity.modulate.a = 1.0 if trails_enabled else 0.45
+	_trail_lifetime.modulate.a = 1.0 if trails_enabled else 0.45
 
 func _reset_options() -> void:
 	_options = DEFAULTS.duplicate()
