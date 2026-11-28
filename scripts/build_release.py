@@ -21,7 +21,7 @@ FILES = (
     "使用說明.txt",
     "README.md",
     "CHANGELOG.md",
-    "docs/VALIDATION-v1.2.1.md",
+    "docs/VALIDATION-v1.3.0.md",
     "LICENSE",
     "NOTICE.md",
     "jv_zh_tw/localize.gd",
@@ -31,6 +31,7 @@ FILES = (
     "jv_zh_tw/effect_preview.gd",
     "jv_zh_tw/topple_stats.gd",
     "jv_zh_tw/ball_trails.gd",
+    "jv_zh_tw/score_showcase.gd",
     "jv_zh_tw/translations.json",
     "jv_zh_tw/guide_zhTW.pck",
     "jv_zh_tw/package-id.txt",
@@ -75,7 +76,7 @@ def build_release(version: str, output_dir: Path) -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--version", default="v1.2.1")
+    parser.add_argument("--version", default="v1.3.0")
     parser.add_argument("--output-dir", type=Path, default=ROOT / "dist")
     args = parser.parse_args()
     target = build_release(args.version, args.output_dir)

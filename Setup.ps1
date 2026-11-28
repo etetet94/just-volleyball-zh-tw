@@ -188,7 +188,8 @@ try {
         -not (Test-Path -LiteralPath (Join-Path $source 'impact_glyph.gd')) -or
         -not (Test-Path -LiteralPath (Join-Path $source 'effect_preview.gd')) -or
         -not (Test-Path -LiteralPath (Join-Path $source 'topple_stats.gd')) -or
-        -not (Test-Path -LiteralPath (Join-Path $source 'ball_trails.gd'))) {
+        -not (Test-Path -LiteralPath (Join-Path $source 'ball_trails.gd')) -or
+        -not (Test-Path -LiteralPath (Join-Path $source 'score_showcase.gd'))) {
         throw '安裝包不完整，請先完整解壓縮所有檔案。'
     }
     if ((Test-Path -LiteralPath $target) -and -not $owned) {
@@ -256,7 +257,7 @@ try {
                 $addedBlock = ([string]$originalInfo.AddedSectionBlock).Replace($oldLine,$line)
             }
         } else { $hadCfgBefore = $cfg.Exists }
-        @{ PackageId=$packageId; HadConfig=$hadCfgBefore; AddedSectionBlock=$addedBlock; HeaderWithoutNewline=$headerWithoutNewline; InstalledUtc=[DateTime]::UtcNow.ToString('o'); TestedBuild='26937150'; ModVersion='1.2.1' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $staging 'install-info.json') -Encoding UTF8
+        @{ PackageId=$packageId; HadConfig=$hadCfgBefore; AddedSectionBlock=$addedBlock; HeaderWithoutNewline=$headerWithoutNewline; InstalledUtc=[DateTime]::UtcNow.ToString('o'); TestedBuild='26937150'; ModVersion='1.3.0' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $staging 'install-info.json') -Encoding UTF8
         if ($hadTarget) { Move-Item -LiteralPath $target -Destination $rollback; $movedOld=$true }
         Move-Item -LiteralPath $staging -Destination $target
         $newTargetPlaced=$true

@@ -5,6 +5,7 @@ signal settings_changed(options: Dictionary)
 signal panel_visibility_changed(open: bool)
 signal effect_preview_requested()
 signal trail_preview_requested()
+signal score_preview_requested()
 
 const CONFIG_PATH = "user://jv_zh_tw/preferences.cfg"
 const EFFECT_KEYS = ["off", "ring", "star", "comic", "fire", "ice", "electric", "portal", "enchant"]
@@ -15,9 +16,13 @@ const DEFAULTS = {
 	"high_contrast": true,
 	"hit_effect": "ring",
 	"effect_intensity": 0.65,
+	"effect_quality": "auto",
 	"trail_enabled": true,
 	"trail_intensity": 0.65,
 	"trail_lifetime": 0.45,
+	"spike_showcase": true,
+	"score_showcase": true,
+	"score_intensity": 0.85,
 	"fun_stats": true,
 }
 const INPUT_ACTIONS = ["move_forward", "move_back", "move_left", "move_right", "aim_left", "aim_right", "aim_up", "aim_down", "jump", "contact", "set", "dive", "block", "serve", "strafe", "aim_recenter", "sprint"]
@@ -31,6 +36,7 @@ var _scale: HSlider
 var _scale_value: Label
 var _contrast: CheckButton
 var _effect: OptionButton
+var _quality: OptionButton
 var _intensity: HSlider
 var _intensity_value: Label
 var _preview: Button
@@ -40,6 +46,10 @@ var _trail_intensity: HSlider
 var _trail_intensity_value: Label
 var _trail_lifetime: HSlider
 var _trail_lifetime_value: Label
+var _spike_showcase: CheckButton
+var _score_showcase: CheckButton
+var _score_intensity: HSlider
+var _score_intensity_value: Label
 var _fun: CheckButton
 var _status: Label
 var _previous_mouse_mode: int = Input.MOUSE_MODE_VISIBLE
@@ -91,19 +101,21 @@ func _normalize(key: String, value: Variant) -> Variant:
 				var number = float(value)
 				return roundf(clampf(number, 1.0, 1.2) * 20.0) / 20.0 if is_finite(number) else DEFAULTS[key]
 			return DEFAULTS[key]
-		"effect_intensity", "trail_intensity":
+		"effect_intensity", "trail_intensity", "score_intensity":
 			if value is float or value is int:
 				var number = float(value)
 				return roundf(clampf(number, 0.2, 1.0) * 20.0) / 20.0 if is_finite(number) else DEFAULTS[key]
 			return DEFAULTS[key]
 		"hit_effect":
 			return str(value) if str(value) in EFFECT_KEYS else DEFAULTS[key]
+		"effect_quality":
+			return str(value) if str(value) in ["auto", "high", "low"] else DEFAULTS[key]
 		"trail_lifetime":
 			if value is float or value is int:
 				var number = float(value)
 				return roundf(clampf(number, 0.15, 0.9) * 20.0) / 20.0 if is_finite(number) else DEFAULTS[key]
 			return DEFAULTS[key]
-		"high_contrast", "fun_stats", "trail_enabled":
+		"high_contrast", "fun_stats", "trail_enabled", "spike_showcase", "score_showcase":
 			return value if value is bool else DEFAULTS[key]
 	return DEFAULTS[key]
 
@@ -270,6 +282,14 @@ func _build_ui() -> void:
 		_effect.add_item(text)
 	_effect.item_selected.connect(func(index): set_option("hit_effect", EFFECT_KEYS[index]))
 	_add_row(rows, "特效主題（擊打＋球跡）", _effect)
+	_quality = OptionButton.new()
+	for text in ["自動調節（建議）", "完整細節", "精簡裝飾"]:
+		_quality.add_item(text)
+	_quality.item_selected.connect(func(index): set_option("effect_quality", ["auto", "high", "low"][index]))
+	_add_row(rows, "特效細節", _quality)
+	var quality_hint = _label("自動模式在畫面吃緊時減少裝飾光絲，保留主體球跡與原生球權提示。", 14, Color("a2b4c6"))
+	quality_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	rows.add_child(quality_hint)
 	var intensity_box = HBoxContainer.new()
 	_intensity = HSlider.new()
 	_intensity.min_value = 0.2
@@ -324,6 +344,36 @@ func _build_ui() -> void:
 	_trail_lifetime_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	trail_lifetime_box.add_child(_trail_lifetime_value)
 	_add_row(rows, "殘留時間", trail_lifetime_box)
+	_spike_showcase = CheckButton.new()
+	_spike_showcase.text = "殺球強化軌跡"
+	_spike_showcase.toggled.connect(func(value): set_option("spike_showcase", value))
+	rows.add_child(_spike_showcase)
+	var spike_hint = _label("殺球加上能量尾翼與氣流；原生敵我球權軌跡會保留。", 14, Color("a2b4c6"))
+	spike_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	rows.add_child(spike_hint)
+	rows.add_child(HSeparator.new())
+	rows.add_child(_label("得分演出", 19, Color("ffe06a")))
+	_score_showcase = CheckButton.new()
+	_score_showcase.text = "華麗得分記分板"
+	_score_showcase.toggled.connect(func(value): set_option("score_showcase", value))
+	rows.add_child(_score_showcase)
+	var score_box = HBoxContainer.new()
+	_score_intensity = HSlider.new()
+	_score_intensity.min_value = 0.2
+	_score_intensity.max_value = 1.0
+	_score_intensity.step = 0.05
+	_score_intensity.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_score_intensity.custom_minimum_size.x = 140
+	_score_intensity.value_changed.connect(func(value): set_option("score_intensity", value))
+	score_box.add_child(_score_intensity)
+	_score_intensity_value = _label("85%", 17)
+	_score_intensity_value.custom_minimum_size.x = 54
+	_score_intensity_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	score_box.add_child(_score_intensity_value)
+	_add_row(rows, "演出強度", score_box)
+	var score_preview = _button("預覽得分演出")
+	score_preview.pressed.connect(func(): score_preview_requested.emit())
+	_add_row(rows, "演出預覽", score_preview)
 	rows.add_child(HSeparator.new())
 	rows.add_child(_label("趣味統計", 19, Color("ffe06a")))
 	_fun = CheckButton.new()
@@ -339,7 +389,7 @@ func _build_ui() -> void:
 	content.add_child(_status)
 	var footer = HBoxContainer.new()
 	content.add_child(footer)
-	var version = _label("模組 v1.2.1  ·  遊戲 v1.0.4.3", 14, Color("9fb0bf"))
+	var version = _label("模組 v1.3.0  ·  遊戲 v1.0.4.3", 14, Color("9fb0bf"))
 	version.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	footer.add_child(version)
 	var reset = _button("恢復預設")
@@ -366,6 +416,7 @@ func _refresh_controls() -> void:
 	_scale_value.text = "%d%%" % roundi(_options.font_scale * 100)
 	_contrast.set_pressed_no_signal(_options.high_contrast)
 	_effect.select(EFFECT_KEYS.find(_options.hit_effect))
+	_quality.select(["auto", "high", "low"].find(_options.effect_quality))
 	_intensity.set_value_no_signal(_options.effect_intensity)
 	_intensity_value.text = "%d%%" % roundi(_options.effect_intensity * 100)
 	_fun.set_pressed_no_signal(_options.fun_stats)
@@ -378,6 +429,12 @@ func _refresh_controls() -> void:
 	_trail_intensity_value.text = "%d%%" % roundi(_options.trail_intensity * 100)
 	_trail_lifetime.set_value_no_signal(_options.trail_lifetime)
 	_trail_lifetime_value.text = "%.2f 秒" % _options.trail_lifetime
+	_spike_showcase.set_pressed_no_signal(_options.spike_showcase)
+	_score_showcase.set_pressed_no_signal(_options.score_showcase)
+	_score_intensity.set_value_no_signal(_options.score_intensity)
+	_score_intensity_value.text = "%d%%" % roundi(_options.score_intensity * 100)
+	_score_intensity.editable = bool(_options.score_showcase)
+	_score_intensity.modulate.a = 1.0 if _score_intensity.editable else 0.45
 	var trails_enabled = bool(_options.trail_enabled) and _options.hit_effect != "off"
 	_trail_intensity.editable = trails_enabled
 	_trail_lifetime.editable = trails_enabled

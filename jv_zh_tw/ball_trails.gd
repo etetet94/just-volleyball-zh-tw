@@ -11,9 +11,13 @@ const MAX_TRACKED = 64
 const SAMPLE_USEC = 33333
 const TELEPORT_DISTANCE = 3.5
 const STATIONARY_MSEC = 140
+const CONTACT_TTL_MSEC = 1400
+const LAUNCH_MOVE_DISTANCE = 0.02
+const MAX_HISTORY_UPLOADS_PER_FRAME = 2
+const HISTORY_BUDGET_USEC = 1200
 
 var preview_only = false # Set before add_child for an isolated settings preview.
-var _options: Dictionary = {"trail_effect": "ring", "trail_intensity": 0.65, "trail_lifetime": 0.45}
+var _options: Dictionary = {"trail_effect": "ring", "trail_intensity": 0.65, "trail_lifetime": 0.45, "spike_showcase": true, "effect_quality": "auto"}
 var _states: Dictionary = {}
 var _games: Array[WeakRef] = []
 var _cameras: Array[WeakRef] = []
@@ -23,6 +27,15 @@ var _next_cache_prune_msec = 0
 var _sample_count = 0
 var _rebuild_count = 0
 var _clears: Dictionary = {}
+var _detail_high = true
+var _last_quality_usec = 0
+var _frame_avg_msec = 16.0
+var _quality_hot_msec = 0.0
+var _quality_cool_msec = 0.0
+var _quality_transitions = 0
+var _process_cursor = 0
+var _last_frame_uploads = 0
+var _last_frame_geometry_usec = 0
 
 class TrailSurface extends Node3D:
 	# These small geometric symbols are original 5x5 pixel designs, not a font
@@ -60,6 +73,7 @@ class TrailSurface extends Node3D:
 	var _core = Color.WHITE
 	var _head_style = ""
 	var _head_intensity = -1.0
+	var _head_spike = false
 	var _rune_cells: Array[PackedVector2Array] = []
 
 	func _ready() -> void:
@@ -236,7 +250,91 @@ class TrailSurface extends Node3D:
 		for cell in _rune_cells[index % _rune_cells.size()]:
 			_pixel(at + right * cell.x + up * cell.y, 0.032 * 0.42, color)
 
-	func draw_history(points: Array, now: int, lifetime: float, style: String, intensity: float, camera: Camera3D) -> void:
+	func _wake_ribbon(a: Vector3, b: Vector3, side: Vector3, offset_a: float, offset_b: float, width_a: float, width_b: float, color_a: Color, color_b: Color) -> void:
+		# A clear central channel leaves the native possession trail readable.
+		for sign_value in [-1.0, 1.0]:
+			var pa = a + side * offset_a * sign_value
+			var pb = b + side * offset_b * sign_value
+			_taper(pa, pb, width_a, width_b, color_a, color_b, side)
+
+	func _spike_wake(a: Vector3, b: Vector3, side: Vector3, old_fresh: float, fresh: float, old_boost: float, boost: float, intensity: float, seed: int, tick: int, style: String, old_along: float, along: float, high_detail: bool) -> void:
+		# Longitudinal taper starts at zero at the *actual* oldest point, even
+		# immediately after contact when every history sample is still fresh.
+		var old_envelope = pow(old_along, 0.78)
+		var envelope = pow(along, 0.78)
+		var old_width = old_envelope * (0.12 + old_boost * 0.15)
+		var width = envelope * (0.12 + boost * 0.15)
+		var old_radius = old_envelope * (0.30 + old_width * 0.50)
+		var radius = envelope * (0.30 + width * 0.50)
+		var showcase_alpha = clampf(intensity * 1.32, 0.0, 1.0)
+		var old_alpha = pow(old_fresh, 0.7) * old_boost * showcase_alpha
+		var alpha = pow(fresh, 0.7) * boost * showcase_alpha
+		# Keep the theme saturated; interpolating to the pale palette head
+		# washed out the entire lance. Near-white is reserved for a hairline.
+		var saturated = _body_old.lerp(_body_new, 0.14)
+		var old_color = saturated
+		var color = saturated
+		old_color.a = old_alpha * 0.10
+		color.a = alpha * 0.10
+		_wake_ribbon(a, b, side, old_radius, radius, old_width * 1.9, width * 1.9, old_color, color)
+		var old_ink = Color(saturated * 0.16, old_alpha * 0.8)
+		var ink = Color(saturated * 0.16, alpha * 0.8)
+		_wake_ribbon(a, b, side, old_radius, radius, old_width * 1.16, width * 1.16, old_ink, ink)
+		old_color.a = old_alpha * 0.96
+		color.a = alpha * 0.96
+		_wake_ribbon(a, b, side, old_radius, radius, old_width * 0.92, width * 0.92, old_color, color)
+		var old_edge = _core.lerp(Color.WHITE, 0.12)
+		var edge = old_edge
+		old_edge.a = old_alpha * 0.88
+		edge.a = alpha * 0.88
+		_wake_ribbon(a, b, side, old_radius - old_width * 0.48, radius - width * 0.48, old_width * 0.11, width * 0.11, old_edge, edge)
+		# Deliberate sparse accents; all are part of this one batched history mesh.
+		var direction = (b - a).normalized()
+		var normal = direction.cross(side).normalized()
+		# Twin corkscrew filaments follow sampled flight, never a forecast path.
+		# Deterministic phase avoids allocating particles or touching game RNG.
+		for spiral in (2 if high_detail else 0):
+			var phase_a = float(tick - 1) * 0.80 + float(spiral) * PI
+			var phase_b = float(tick) * 0.80 + float(spiral) * PI
+			var spiral_a = a + (side * cos(phase_a) + normal * sin(phase_a)) * old_radius * 1.75
+			var spiral_b = b + (side * cos(phase_b) + normal * sin(phase_b)) * radius * 1.75
+			_line(spiral_a, spiral_b, 0.075, Color(saturated, alpha * 0.16))
+			_line(spiral_a, spiral_b, 0.020, Color(_core.lerp(saturated, 0.32), alpha * 0.85))
+		var flank = side * (-1.0 if tick % 2 == 0 else 1.0)
+		if tick % 2 == 0:
+			var reach = radius + 0.13 + _noise(seed) * 0.22
+			var start = b + flank * reach
+			var finish = start - direction * (0.22 + boost * 0.35)
+			_line(start, finish, 0.017, Color(_body_old.lerp(_core, 0.4), alpha * 0.8))
+			if style == "fire":
+				_triangle(start - side * 0.055, start + side * 0.055, finish - direction * 0.18 + _camera_up * 0.08, Color(1.0, 0.54, 0.12, alpha * 0.8))
+			elif style == "electric":
+				var middle = start.lerp(finish, 0.5) + side * 0.13
+				_line(start, middle, 0.036, Color(0.83, 0.75, 1.0, alpha))
+				_line(middle, finish, 0.022, Color(0.43, 0.54, 1.0, alpha))
+			elif style == "ice":
+				_quad(start - side * 0.06, start + _camera_up * 0.15, start + side * 0.06, start - _camera_up * 0.15, Color(0.77, 0.97, 1.0, alpha), Color(0.3, 0.74, 1.0, alpha))
+			elif style == "portal":
+				_pixel(start, 0.045, Color(0.73, 0.35, 1.0, alpha))
+			elif style == "star":
+				_spark(start, 0.10, Color(1.0, 0.96, 0.58, alpha))
+		if tick % 5 == 0 and boost > 0.2:
+			# Broken shock collars perpendicular to the measured flight direction.
+			# Open arcs avoid a solid hoop hiding the ball or a player's body.
+			var wave_radius = radius + 0.12 + (1.0 - fresh) * 0.22
+			for collar in (2 if high_detail else 1):
+				var collar_radius = wave_radius * (1.0 + float(collar) * 0.27)
+				var center = b - direction * float(collar) * 0.09
+				for arc in 2:
+					var phase = float(arc) * PI + 0.20 + float(collar) * 0.16
+					for j in 4:
+						var t0 = phase + float(j) * 0.30
+						var t1 = t0 + 0.30
+						var c0 = center + (side * cos(t0) + normal * sin(t0)) * collar_radius
+						var c1 = center + (side * cos(t1) + normal * sin(t1)) * collar_radius
+						_line(c0, c1, 0.026 if collar == 0 else 0.016, Color(_core.lerp(saturated, 0.25), alpha * (0.82 if collar == 0 else 0.5)))
+
+	func draw_history(points: Array, now: int, lifetime: float, style: String, intensity: float, camera: Camera3D, high_detail: bool = true) -> void:
 		triangles = 0
 		if points.size() < 2:
 			_history_art.visible = false
@@ -244,7 +342,10 @@ class TrailSurface extends Node3D:
 		_history_art.visible = true
 		_camera(camera)
 		_palette(style)
-		_begin(points.size() * 40 + 64)
+		var boosted_points = 0
+		for point in points:
+			if float(point.get("spike", 0.0)) > 0.0: boosted_points += 1
+		_begin(points.size() * 40 + boosted_points * (176 if high_detail else 112) + 64)
 		var lifetime_msec = lifetime * 1000.0
 		var width_scale = lerpf(0.65, 1.05, intensity)
 		var previous_fresh = clampf(1.0 - float(now - int(points[0].stamp)) / lifetime_msec, 0.0, 1.0)
@@ -263,6 +364,13 @@ class TrailSurface extends Node3D:
 			var color = _body_old.lerp(_body_new, fresh)
 			color.a = fade * 0.94
 			var old_color = previous_color
+			var spike = float(points[i].get("spike", 0.0))
+			var previous_spike = float(points[i - 1].get("spike", 0.0))
+			# The native ownership ribbon occupies the center. Enhanced spike
+			# energy is drawn on either side, with only a very soft central tint.
+			if spike > 0.0 or previous_spike > 0.0:
+				color.a *= 0.12
+				old_color.a *= 0.12
 			var halo_a = old_color
 			var halo_b = color
 			halo_a.a *= 0.22
@@ -277,6 +385,9 @@ class TrailSurface extends Node3D:
 			var core = _core
 			core.a = pow(fresh, 0.55) * intensity * 0.94
 			var old_core = previous_core
+			if spike > 0.0 or previous_spike > 0.0:
+				core.a *= 0.12
+				old_core.a *= 0.12
 			_taper(a, b, old_width * 0.24, width * 0.24, old_core, core, segment_side)
 			previous_fresh = fresh
 			previous_color = color
@@ -286,6 +397,8 @@ class TrailSurface extends Node3D:
 			var up = _camera_up
 			var age = 1.0 - fresh
 			var tick = int(points[i].get("serial", i))
+			if spike > 0.0 or previous_spike > 0.0:
+				_spike_wake(a, b, segment_side * 2.0, clampf(1.0 - float(now - int(points[i - 1].stamp)) / lifetime_msec, 0.0, 1.0), fresh, previous_spike, spike, intensity, seed, tick, style, float(i - 1) / float(points.size() - 1), float(i) / float(points.size() - 1), high_detail)
 			if style == "star" and tick % 3 == 0:
 				var drift = side * (_noise(seed) - 0.5) * age * 0.6 + up * age * 0.25
 				_spark(b + drift, 0.04 + fresh * 0.06, Color(1.0, 0.88, 0.32, fade))
@@ -295,13 +408,13 @@ class TrailSurface extends Node3D:
 				_line(b + offset - direction * 0.2, b + offset + direction * 0.12, 0.025, Color(1.0, 0.91, 0.32, fade))
 				if tick % 6 == 0:
 					_spark(b + offset, 0.1, Color(1.0, 0.52, 0.73, fade))
-			elif style == "portal" and tick % 2 == 0:
-				for j in 2:
+			elif style == "portal" and tick % (2 if high_detail else 4) == 0:
+				for j in (2 if high_detail else 1):
 					var drift = side * (_noise(seed + j * 41) - 0.5) * age * 0.8 + up * age * 0.25 + _camera_back * (_noise(seed + 71 + j) - 0.5) * age * 0.5
 					_pixel(b + drift, 0.025 + _noise(seed + j) * 0.025, Color(0.70, 0.26, 1.0, fade))
 				if tick % 4 == 0:
 					_pixel(b, 0.022, Color(0.3, 1.0, 0.82, fade))
-			elif style == "enchant" and tick % 4 == 0:
+			elif style == "enchant" and tick % (4 if high_detail else 8) == 0:
 				var rhythm = sin(float(now - seed) * 0.009 + float(seed % 7))
 				var drift = side * ((_noise(seed) - 0.5) * 0.35 + rhythm * 0.06) + up * (0.12 + age * 0.45)
 				_rune(b + drift, seed % RUNES.size(), fade)
@@ -320,43 +433,61 @@ class TrailSurface extends Node3D:
 		history_uploads += 1
 		triangles = _drawing_triangles
 
-	func draw_head(last: Vector3, head: Vector3, style: String, intensity: float, camera: Camera3D) -> void:
+	func draw_head(last: Vector3, head: Vector3, style: String, intensity: float, camera: Camera3D, spike: float = 0.0) -> void:
 		var direction = head - last
 		_head_art.visible = direction.length_squared() > 0.000001
 		if not _head_art.visible:
 			return
 		_camera(camera)
-		if _head_style != style or _head_intensity != intensity:
+		var spike_active = spike > 0.0
+		if _head_style != style or _head_intensity != intensity or _head_spike != spike_active:
 			_palette(style)
-			_begin(12)
-			var color = _body_old.lerp(_body_new, 1.0)
+			_begin(24 if spike_active else 12)
+			var color = _body_old.lerp(_body_new, 0.14 if spike_active else 1.0)
 			color.a = intensity * 0.94
-			var halo = color
-			halo.a *= 0.22
+			var halo = Color(color * 0.16, intensity * 0.65) if spike_active else color
+			if not spike_active: halo.a *= 0.22
 			var core = _core
 			core.a = intensity * 0.94
 			var width = 0.13 * lerpf(0.65, 1.05, intensity)
 			for layer in 3:
 				var half_width = width * (2.25 if layer == 0 else 1.0 if layer == 1 else 0.24) * 0.5
 				var tint = halo if layer == 0 else color if layer == 1 else core
-				_quad(Vector3(-half_width, 0, 0), Vector3(half_width, 0, 0), Vector3(half_width, 0, 1), Vector3(-half_width, 0, 1), tint, tint)
+				if spike_active:
+					# Prebuilt split head, transformed each presentation frame.
+					half_width *= 1.6
+					for sign_value in [-1.0, 1.0]:
+						var x = 0.43 * sign_value
+						_quad(Vector3(x - half_width, 0, 0), Vector3(x + half_width, 0, 0), Vector3(x + half_width * 0.8, 0, 1), Vector3(x - half_width * 0.8, 0, 1), tint, tint)
+				else:
+					_quad(Vector3(-half_width, 0, 0), Vector3(half_width, 0, 0), Vector3(half_width, 0, 1), Vector3(-half_width, 0, 1), tint, tint)
 			_finish(head_mesh)
 			_head_style = style
 			_head_intensity = intensity
+			_head_spike = spike_active
 			head_mesh_builds += 1
 		var side = _side(last, head)
-		_head_art.transform = Transform3D(Basis(side, direction.normalized().cross(side), direction), last)
+		_head_art.transform = Transform3D(Basis(side * (lerpf(0.85, 1.15, spike) if spike_active else 1.0), direction.normalized().cross(side), direction), last)
 		head_transforms += 1
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	process_priority = 10010 # Observe the ball after the game's visual presentation.
 	if not preview_only:
+		var net = get_tree().root.get_node_or_null("Net")
+		if net != null:
+			if net.has_signal("event_received"): net.connect("event_received", _on_network_event)
+			if net.has_signal("own_ball_pose"): net.connect("own_ball_pose", _on_own_ball_pose)
 		get_tree().node_added.connect(_on_node_added)
 		_scan(get_tree().root)
 
 func configure(options: Dictionary) -> void:
 	var previous = str(_options.trail_effect)
+	var previous_spike = bool(_options.spike_showcase)
+	if options.has("effect_quality") and str(options.effect_quality) in ["auto", "high", "low"]:
+		_options.effect_quality = str(options.effect_quality)
+	if options.has("spike_showcase"):
+		_options.spike_showcase = bool(options.spike_showcase)
 	if options.has("trail_effect"):
 		_options.trail_effect = str(options.trail_effect) if str(options.trail_effect) in STYLES else "ring"
 		if _options.trail_effect == "ribbon":
@@ -364,7 +495,7 @@ func configure(options: Dictionary) -> void:
 	for pair in [["trail_intensity", 0.2, 1.0], ["trail_lifetime", 0.15, 0.9]]:
 		if options.has(pair[0]) and (options[pair[0]] is int or options[pair[0]] is float) and is_finite(float(options[pair[0]])):
 			_options[pair[0]] = clampf(float(options[pair[0]]), pair[1], pair[2])
-	if previous != _options.trail_effect or _options.trail_effect == "off":
+	if previous != _options.trail_effect or previous_spike != bool(_options.spike_showcase) or _options.trail_effect == "off":
 		for state in _states.values():
 			_clear(state, "setting")
 	_next_sample_usec = 0
@@ -444,9 +575,104 @@ func _track(ball: Node3D, preview: bool) -> void:
 	if not is_instance_valid(ball) or not ball.is_inside_tree() or _states.has(ball.get_instance_id()) or _states.size() >= MAX_TRACKED:
 		return
 	var game = null if preview else _find_game(ball)
-	_states[ball.get_instance_id()] = {"ball": weakref(ball), "game": weakref(game) if game != null else null, "preview": preview, "points": [], "renderer": null, "position": Vector3.INF, "motion_anchor": Vector3.INF, "head": Vector3.INF, "last_frame": 0, "last_move": 0, "generation": int(game.get("_match_gen")) if game != null else 0, "phase": int(game.get("_phase")) if game != null else -1, "hit_by": 0, "center_source": "ball", "world": 0, "reason": "pending", "serial": 0}
+	_states[ball.get_instance_id()] = {"ball": weakref(ball), "game": weakref(game) if game != null else null, "preview": preview, "points": [], "renderer": null, "position": Vector3.INF, "motion_anchor": Vector3.INF, "head": Vector3.INF, "last_frame": 0, "last_move": 0, "generation": int(game.get("_match_gen")) if game != null else 0, "phase": int(game.get("_phase")) if game != null else -1, "hit_by": 0, "center_source": "ball", "world": 0, "reason": "pending", "serial": 0, "contact_kind": 0, "contact_power": 0.0, "contact_seq": int(ball.get("strike_seq")) if not preview else 0, "contact_at": 0, "contact_pending": false, "contact_origin": Vector3.INF, "contact_flight_at": 0, "sample_position": Vector3.INF, "sample_at": 0, "spike": 0.0, "history_dirty": false, "history_head": Vector3.INF}
 
-func _clear(state: Dictionary, reason: String) -> void:
+	if not preview:
+		if ball.has_signal("struck"): ball.connect("struck", _on_ball_struck.bind(weakref(ball)))
+		for event in ["bounced", "wall_hit", "net_hit"]:
+			if ball.has_signal(event): ball.connect(event, _on_ball_stopped.bind(weakref(ball)))
+
+func _set_contact(ball: Node, kind: int, power: float, sequence: int = -1) -> void:
+	if not is_instance_valid(ball) or not _states.has(ball.get_instance_id()) or kind < 1 or kind > 6 or not is_finite(power):
+		return
+	var state: Dictionary = _states[ball.get_instance_id()]
+	var game = state.game.get_ref() if state.game is WeakRef else null
+	if is_instance_valid(game) and int(game.get("_match_gen")) != int(state.generation):
+		_clear(state, "generation")
+		state.generation = int(game.get("_match_gen"))
+		state.phase = int(game.get("_phase"))
+		state.contact_seq = -1
+		state.contact_at = 0
+	if sequence >= 0 and (sequence < int(state.contact_seq) or (sequence == int(state.contact_seq) and int(state.contact_at) > 0)):
+		return
+	state.contact_kind = kind
+	state.contact_power = clampf(power, 0.0, 2.0)
+	state.contact_seq = sequence if sequence >= 0 else int(ball.get("strike_seq"))
+	state.contact_at = _clock_usec() / 1000
+	state.contact_pending = kind == 3
+	state.contact_origin = _display_position(ball, state)
+	state.contact_flight_at = 0
+
+func _on_ball_struck(_pos: Vector3, power: float, kind: int, reference: WeakRef) -> void:
+	var ball = reference.get_ref()
+	if is_instance_valid(ball): _set_contact(ball, kind, power)
+
+func _on_ball_stopped(reference: WeakRef) -> void:
+	var ball = reference.get_ref()
+	if is_instance_valid(ball) and _states.has(ball.get_instance_id()):
+		_states[ball.get_instance_id()].contact_kind = 0
+		_states[ball.get_instance_id()].spike = 0.0
+		_states[ball.get_instance_id()].contact_pending = false
+		_states[ball.get_instance_id()].contact_flight_at = 0
+
+func _on_network_event(event: String, args: Dictionary) -> void:
+	if event in ["bounce", "net", "wall"]:
+		var generation = -1
+		if args.has("g"):
+			var value = args.g
+			if not (value is int or value is float) or not is_finite(float(value)) or float(value) < 0.0: return
+			generation = int(value)
+		for reference in _games:
+			var game = reference.get_ref()
+			if is_instance_valid(game) and int(game.get("_net_role")) == 2:
+				if generation >= 0 and int(game.get("_match_gen")) != generation: continue
+				var ball = game.get("ball")
+				if is_instance_valid(ball): _on_ball_stopped(weakref(ball))
+		return
+	if event != "strike": return
+	var kind = args.get("k", 0)
+	var power = args.get("w", 0.0)
+	var sequence = args.get("n", -1)
+	if not (kind is int or kind is float) or not (power is int or power is float) or not (sequence is int or sequence is float): return
+	if not is_finite(float(kind)) or not is_finite(float(power)) or not is_finite(float(sequence)) or float(sequence) < 0.0: return
+	# Native clients adopt the original event after it is delivered. Read the
+	# same accepted generation/sequence without changing or sending anything.
+	call_deferred("_accept_network_contact", int(kind), float(power), int(sequence), int(args.get("g", -1)))
+
+func _accept_network_contact(kind: int, power: float, sequence: int, generation: int) -> void:
+	for reference in _games:
+		var game = reference.get_ref()
+		if not is_instance_valid(game) or not game.is_inside_tree() or int(game.get("_net_role")) != 2: continue
+		if generation >= 0 and int(game.get("_match_gen")) != generation: continue
+		var ball = game.get("ball")
+		if is_instance_valid(ball) and int(ball.get("strike_seq")) == sequence:
+			_set_contact(ball, kind, power, sequence)
+
+func _on_own_ball_pose(_peer: int, pose: PackedFloat32Array) -> void:
+	if pose.size() < 11: return
+	for index in [0, 7, 8, 9, 10]:
+		if not is_finite(pose[index]): return
+	# Resolve by native body id after OwnBalls creates/updates its exact ghost.
+	call_deferred("_accept_ghost_contact", int(pose[0]), int(pose[7]), int(pose[8]), int(pose[9]), float(pose[10]))
+
+func _accept_ghost_contact(body_id: int, pose_state: int, sequence: int, kind: int, power: float) -> void:
+	for reference in _games:
+		var game = reference.get_ref()
+		if not is_instance_valid(game) or not game.is_inside_tree() or not bool(game.get("embedded")): continue
+		var practice = game.get("_practice")
+		var own = practice.get("own") if practice != null else null
+		var ghosts = own.get("_ghosts") if own != null else null
+		if not ghosts is Dictionary or not ghosts.has(body_id): continue
+		var ghost: Dictionary = ghosts[body_id]
+		var ball = ghost.get("ball")
+		if not is_instance_valid(ball) or not _states.has(ball.get_instance_id()): continue
+		var state: Dictionary = _states[ball.get_instance_id()]
+		if pose_state != 1:
+			state.contact_kind = 0
+		elif sequence > int(state.contact_seq):
+			_set_contact(ball, kind, power, sequence)
+
+func _clear(state: Dictionary, reason: String, preserve_pending_contact: bool = false) -> void:
 	var renderer = state.renderer.get_ref() if state.renderer is WeakRef else null
 	if not state.points.is_empty() or is_instance_valid(renderer):
 		_clears[reason] = int(_clears.get(reason, 0)) + 1
@@ -457,6 +683,16 @@ func _clear(state: Dictionary, reason: String) -> void:
 	state.position = Vector3.INF
 	state.motion_anchor = Vector3.INF
 	state.head = Vector3.INF
+	if not preserve_pending_contact:
+		state.contact_kind = 0
+		state.contact_pending = false
+		state.contact_origin = Vector3.INF
+		state.contact_flight_at = 0
+	state.spike = 0.0
+	state.sample_position = Vector3.INF
+	state.sample_at = 0
+	state.history_dirty = false
+	state.history_head = Vector3.INF
 
 func _reason_inactive(ball: Node3D, state: Dictionary) -> String:
 	if not ball.is_visible_in_tree():
@@ -534,11 +770,45 @@ func _renderer(ball: Node3D, state: Dictionary) -> Node3D:
 	state.renderer = weakref(renderer)
 	return renderer
 
+func _update_quality(now_usec: int) -> void:
+	if _options.effect_quality != "auto":
+		_detail_high = _options.effect_quality == "high"
+		_last_quality_usec = now_usec
+		_quality_hot_msec = 0.0
+		_quality_cool_msec = 0.0
+		return
+	var elapsed = float(now_usec - _last_quality_usec) / 1000.0
+	_last_quality_usec = now_usec
+	# Ignore idle scenes, pauses, native hitstop and scheduling/teleport spikes.
+	# Only sustained frame pressure changes decorative geometry, never the
+	# core lance silhouette, ball position, physics or native ownership cue.
+	if get_tree().paused or Engine.time_scale <= 0.001 or _renderer_count() == 0 or elapsed < 1.0 or elapsed > 100.0:
+		_quality_hot_msec = 0.0
+		_quality_cool_msec = 0.0
+		return
+	_frame_avg_msec = lerpf(_frame_avg_msec, elapsed, 0.08)
+	if _frame_avg_msec > 22.0:
+		_quality_hot_msec += elapsed
+		_quality_cool_msec = 0.0
+	elif _frame_avg_msec < 17.0:
+		_quality_cool_msec += elapsed
+		_quality_hot_msec = 0.0
+	else:
+		_quality_hot_msec = 0.0
+		_quality_cool_msec = 0.0
+	if _detail_high and _quality_hot_msec >= 1000.0:
+		_detail_high = false
+		_quality_transitions += 1
+	elif not _detail_high and _quality_cool_msec >= 2000.0:
+		_detail_high = true
+		_quality_transitions += 1
+
 func _clock_usec() -> int:
 	return Time.get_ticks_usec()
 
 func _process(_delta: float) -> void:
 	var now_usec = _clock_usec()
+	_update_quality(now_usec)
 	var now = now_usec / 1000
 	if now >= _next_cache_prune_msec:
 		_prune_scene_cache()
@@ -553,7 +823,12 @@ func _process(_delta: float) -> void:
 	var sample = now_usec >= _next_sample_usec
 	if sample:
 		_next_sample_usec = now_usec + SAMPLE_USEC
-	for id in _states.keys():
+	_last_frame_uploads = 0
+	_last_frame_geometry_usec = 0
+	var ids = _states.keys()
+	var next_cursor = _process_cursor
+	for slot in ids.size():
+		var id = ids[(slot + _process_cursor) % ids.size()]
 		var state: Dictionary = _states[id]
 		var ball = state.ball.get_ref()
 		if not is_instance_valid(ball) or not ball.is_inside_tree() or ball.is_queued_for_deletion():
@@ -580,6 +855,9 @@ func _process(_delta: float) -> void:
 			var phase = int(game.get("_phase"))
 			if generation != state.generation or phase != state.phase:
 				_clear(state, "phase")
+				if generation != state.generation:
+					state.contact_seq = -1
+					state.contact_at = 0
 				state.generation = generation
 				state.phase = phase
 		var world = ball.get_world_3d().get_instance_id()
@@ -604,9 +882,21 @@ func _process(_delta: float) -> void:
 		state.position = pos
 		state.head = pos
 		state.last_frame = now
+		if int(state.contact_kind) == 3 and bool(state.contact_pending):
+			# Native hard hits briefly hold the ball still. Do not consume a
+			# genuine strike while its hitstop is waiting to launch the flight.
+			# Track actual presented displacement after native hitstop, bounded
+			# by a finite timeout; never use last_hit_kind to re-arm a contact.
+			if now - int(state.contact_at) >= CONTACT_TTL_MSEC:
+				state.contact_kind = 0
+				state.contact_pending = false
+			elif float(ball.get("hitstop_left")) <= 0.0 and (state.contact_origin as Vector3).distance_squared_to(pos) > LAUNCH_MOVE_DISTANCE * LAUNCH_MOVE_DISTANCE:
+				state.contact_pending = false
+				state.contact_flight_at = now
 		if now - int(state.last_move) > STATIONARY_MSEC:
 			var motion_anchor: Vector3 = state.motion_anchor
-			_clear(state, "stationary")
+			var waiting_launch = int(state.contact_kind) == 3 and bool(state.contact_pending) and now - int(state.contact_at) < CONTACT_TTL_MSEC
+			_clear(state, "stationary", waiting_launch)
 			state.position = pos
 			# Keep the last confirmed motion position while stopped, so a slow
 			# restart can accumulate displacement across several render frames.
@@ -615,26 +905,44 @@ func _process(_delta: float) -> void:
 			continue
 		var points: Array = state.points
 		if sample:
+			var measured_speed = 0.0
+			if (state.sample_position as Vector3).is_finite() and now > int(state.sample_at):
+				measured_speed = pos.distance_to(state.sample_position) * 1000.0 / float(now - int(state.sample_at))
+			state.sample_position = pos
+			state.sample_at = now
+			var genuine_spike = state.preview or (int(state.contact_kind) == 3 and not bool(state.contact_pending) and now - int(state.contact_flight_at) < CONTACT_TTL_MSEC)
+			state.spike = clampf(0.58 + measured_speed / 65.0, 0.58, 1.0) * clampf(0.7 + float(state.contact_power) * 0.3, 0.7, 1.0) if genuine_spike and bool(_options.spike_showcase) else 0.0
 			while not points.is_empty() and now - int(points[0].stamp) > float(_options.trail_lifetime) * 1000.0:
 				points.pop_front()
 			if points.is_empty() or (points.back().position as Vector3).distance_squared_to(pos) > 0.000144:
 				state.serial += 1
-				points.append({"position": pos, "stamp": now, "serial": state.serial})
+				points.append({"position": pos, "stamp": now, "serial": state.serial, "spike": state.spike})
 				_sample_count += 1
 			while points.size() > MAX_HISTORY:
 				points.pop_front()
+			state.history_dirty = true
 		if points.is_empty():
 			continue
 		var renderer = _renderer(ball, state)
 		if renderer == null:
 			_clear(state, "capacity")
 			continue
-		if sample:
-			renderer.draw_history(points, now, float(_options.trail_lifetime), str(_options.trail_effect), float(_options.trail_intensity), camera)
+		if state.history_dirty and _last_frame_uploads < MAX_HISTORY_UPLOADS_PER_FRAME and _last_frame_geometry_usec < HISTORY_BUDGET_USEC:
+			var began = Time.get_ticks_usec()
+			renderer.draw_history(points, now, float(_options.trail_lifetime), str(_options.trail_effect), float(_options.trail_intensity), camera, _detail_high)
+			_last_frame_geometry_usec += Time.get_ticks_usec() - began
+			_last_frame_uploads += 1
+			next_cursor = (slot + _process_cursor + 1) % ids.size()
+			state.history_dirty = false
+			state.history_head = points.back().position
 			_rebuild_count += 1
 		# A reusable three-layer ribbon follows the displayed ball by transform;
 		# history/decorative geometry is still sampled/rebuilt at <= 30 Hz.
-		renderer.draw_head(points.back().position, pos, str(_options.trail_effect), float(_options.trail_intensity), camera)
+		renderer.draw_head(state.history_head if (state.history_head as Vector3).is_finite() else points.back().position, pos, str(_options.trail_effect), float(_options.trail_intensity), camera, float(state.spike))
+
+	# Round-robin fairness spreads a practice court full of balls over frames.
+	# Live heads still follow every rendered frame while old history uploads wait.
+	if not ids.is_empty(): _process_cursor = next_cursor
 
 func get_diagnostics() -> Dictionary:
 	var states: Array = []
@@ -647,8 +955,8 @@ func get_diagnostics() -> Dictionary:
 		var count = state.points.size() + (1 if not state.points.is_empty() else 0)
 		max_points = maxi(max_points, count)
 		total_points += count
-		states.append({"id": id, "preview": state.preview, "point_count": count, "history_count": state.points.size(), "head_position": state.head, "center_source": state.center_source, "reason": state.reason, "renderer": is_instance_valid(renderer), "top_level": renderer.top_level if is_instance_valid(renderer) else false, "same_world": is_instance_valid(ball) and is_instance_valid(renderer) and ball.get_world_3d() == renderer.get_world_3d(), "triangles": renderer.triangles if is_instance_valid(renderer) else 0, "history_uploads": renderer.history_uploads if is_instance_valid(renderer) else 0, "head_mesh_builds": renderer.head_mesh_builds if is_instance_valid(renderer) else 0, "head_transforms": renderer.head_transforms if is_instance_valid(renderer) else 0})
-	return {"effect": _options.trail_effect, "preview_only": preview_only, "tracked_balls": _states.size(), "active_trails": _renderer_count(), "total_points": total_points, "max_points": max_points, "samples": _sample_count, "history_rebuilds": _rebuild_count, "clears": _clears.duplicate(), "states": states}
+		states.append({"id": id, "preview": state.preview, "point_count": count, "history_count": state.points.size(), "head_position": state.head, "center_source": state.center_source, "reason": state.reason, "renderer": is_instance_valid(renderer), "top_level": renderer.top_level if is_instance_valid(renderer) else false, "same_world": is_instance_valid(ball) and is_instance_valid(renderer) and ball.get_world_3d() == renderer.get_world_3d(), "spike": state.spike, "contact_pending": state.contact_pending, "history_pending": state.history_dirty, "contact_kind": state.contact_kind, "triangles": renderer.triangles if is_instance_valid(renderer) else 0, "history_uploads": renderer.history_uploads if is_instance_valid(renderer) else 0, "head_mesh_builds": renderer.head_mesh_builds if is_instance_valid(renderer) else 0, "head_transforms": renderer.head_transforms if is_instance_valid(renderer) else 0})
+	return {"history_upload_limit": MAX_HISTORY_UPLOADS_PER_FRAME, "last_frame_uploads": _last_frame_uploads, "last_frame_geometry_usec": _last_frame_geometry_usec, "effect": _options.trail_effect, "spike_showcase": _options.spike_showcase, "effect_quality": _options.effect_quality, "detail": "high" if _detail_high else "low", "frame_average_msec": _frame_avg_msec, "quality_transitions": _quality_transitions, "preview_only": preview_only, "tracked_balls": _states.size(), "active_trails": _renderer_count(), "total_points": total_points, "max_points": max_points, "samples": _sample_count, "history_rebuilds": _rebuild_count, "clears": _clears.duplicate(), "states": states}
 
 func debug_snapshot() -> Dictionary:
 	return get_diagnostics()

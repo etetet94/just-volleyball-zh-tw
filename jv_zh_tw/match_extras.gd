@@ -37,7 +37,7 @@ func _ready() -> void:
 	_scan(get_tree().root)
 
 func configure(options: Dictionary) -> void:
-	for key in ["hit_effect", "effect_intensity", "fun_stats"]:
+	for key in ["hit_effect", "effect_intensity", "fun_stats", "spike_showcase"]:
 		if options.has(key):
 			_options[key] = options[key]
 	if not str(_options.hit_effect) in ["off", "ring", "star", "comic", "fire", "ice", "electric", "portal", "enchant"]:
@@ -247,7 +247,7 @@ func _trim_event_history() -> void:
 	if _freeplay_seen.size() > 128:
 		_freeplay_seen.clear()
 
-func _spawn_impact(parent: Node, pos: Vector3, power: float, _kind: int) -> bool:
+func _spawn_impact(parent: Node, pos: Vector3, power: float, kind: int) -> bool:
 	if _options.hit_effect == "off" or DisplayServer.get_name() == "headless" or _impact_script == null:
 		return false
 	if not is_instance_valid(parent) or not parent.is_inside_tree():
@@ -257,6 +257,7 @@ func _spawn_impact(parent: Node, pos: Vector3, power: float, _kind: int) -> bool
 		return false
 	var effect = _impact_script.new()
 	effect.style = str(_options.hit_effect)
+	effect.spike = kind == 3 and bool(_options.get("spike_showcase", true))
 	effect.strength = float(_options.effect_intensity) * clampf(0.7 + power * 0.3, 0.7, 1.0)
 	# Keep the selected theme's palette consistent with its paired ball trail.
 	effect.tint = Color("79baff")

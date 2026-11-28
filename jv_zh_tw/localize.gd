@@ -23,6 +23,7 @@ var _extras: Node
 var _topple_stats: Node
 var _effect_preview: Node
 var _ball_trails: Node
+var _score_showcase: Node
 var _style_revision := 0
 var _applying_style := false
 var _visits := 0
@@ -97,7 +98,7 @@ func _enter_tree() -> void:
 	_chinese_bold = _load_chinese_font(true)
 	get_tree().node_added.connect(_on_node_added)
 	call_deferred("_refresh")
-	print("[JV zh-TW] v1.2.1 loaded ", _messages.size(), " entries")
+	print("[JV zh-TW] v1.3.0 loaded ", _messages.size(), " entries")
 
 func _ready() -> void:
 	TranslationServer.set_locale("zh_TW")
@@ -127,6 +128,14 @@ func _start_modules() -> void:
 			_ball_trails = script.new()
 			_ball_trails.name = "BallTrails"
 			add_child(_ball_trails)
+	var score_path = _base.path_join("score_showcase.gd")
+	if FileAccess.file_exists(score_path):
+		var script = load(score_path)
+		if script != null and script.can_instantiate():
+			_score_showcase = script.new()
+			_score_showcase.name = "ScoreShowcase"
+			add_child(_score_showcase)
+			_score_showcase.set_font(_chinese_bold)
 	var panel_path = _base.path_join("settings_panel.gd")
 	if FileAccess.file_exists(panel_path):
 		var script = load(panel_path)
@@ -136,12 +145,21 @@ func _start_modules() -> void:
 			_settings_panel.settings_changed.connect(_on_mod_settings_changed)
 			_settings_panel.effect_preview_requested.connect(_on_effect_preview_requested)
 			_settings_panel.trail_preview_requested.connect(_on_trail_preview_requested)
+			_settings_panel.score_preview_requested.connect(_on_score_preview_requested)
+			_settings_panel.panel_visibility_changed.connect(_on_panel_visibility_changed)
 			add_child(_settings_panel)
 			_on_mod_settings_changed(_settings_panel.get_options())
 	if is_instance_valid(_extras) and _extras.has_method("configure"):
 		_configure_extras()
 	if is_instance_valid(_topple_stats): _topple_stats.configure(_options)
 	if is_instance_valid(_ball_trails): _ball_trails.configure(_options)
+	if is_instance_valid(_score_showcase): _score_showcase.configure(_options)
+
+func _on_panel_visibility_changed(open: bool) -> void:
+	if is_instance_valid(_score_showcase): _score_showcase.set_suppressed(open)
+
+func _on_score_preview_requested() -> void:
+	if is_instance_valid(_score_showcase): _score_showcase.preview()
 
 func _configure_extras() -> void:
 	var options = _options.duplicate()
@@ -180,6 +198,7 @@ func _on_mod_settings_changed(options: Dictionary) -> void:
 		_configure_extras()
 	if is_instance_valid(_topple_stats): _topple_stats.configure(_options)
 	if is_instance_valid(_ball_trails): _ball_trails.configure(_options)
+	if is_instance_valid(_score_showcase): _score_showcase.configure(_options)
 	if style_changed: call_deferred("_refresh")
 
 func _load_chinese_font(bold: bool = false) -> Font:

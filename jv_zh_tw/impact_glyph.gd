@@ -4,6 +4,7 @@ extends Node3D
 var style := "ring"
 var tint := Color("79baff")
 var strength := 0.65
+var spike := false
 var age := 0.0
 var _born_usec: int = 0
 static var _comic_font_shared: Font
@@ -20,6 +21,7 @@ var _lifetime := LIFETIME
 var _particle_material: StandardMaterial3D
 var _glow_material: StandardMaterial3D
 var _glow: MeshInstance3D
+var _spike_shock: MeshInstance3D
 
 func _ready() -> void:
 	set_meta("jv_mod_ui", true)
@@ -59,6 +61,7 @@ func _ready() -> void:
 	_art.extra_cull_margin = 0.5
 	add_child(_art)
 	_build_glow()
+	if spike: _build_spike_shock()
 	if style == "comic":
 		_caption = Label3D.new()
 		_caption.text = "啪！"
@@ -128,6 +131,37 @@ func _line(mesh: ImmediateMesh, a: Vector3, b: Vector3, width: float, color: Col
 	var perpendicular = Vector3(-direction.y, direction.x, 0) * width * 0.5
 	_triangle(mesh, a + perpendicular, b + perpendicular, b - perpendicular, color)
 	_triangle(mesh, a + perpendicular, b - perpendicular, a - perpendicular, color)
+
+func _build_spike_shock() -> void:
+	# One static mesh, animated with a transform; no per-frame mesh uploads.
+	var color = tint
+	match style:
+		"star", "comic": color = Color("ffd76d")
+		"fire": color = Color("ff8838")
+		"ice": color = Color("6aeaff")
+		"electric": color = Color("a49bff")
+		"portal", "enchant": color = Color("b66bff")
+	var mesh = ImmediateMesh.new()
+	mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in 48:
+		var a = TAU * float(i) / 48.0
+		var b = TAU * float(i + 1) / 48.0
+		var va = Vector3(cos(a), sin(a) * 0.58, 0.035)
+		var vb = Vector3(cos(b), sin(b) * 0.58, 0.035)
+		_gradient_triangle(mesh, [va * 0.83, vb * 0.83, vb], [Color(color, 0), Color(color, 0), Color(color, 0.8)])
+		_gradient_triangle(mesh, [va * 0.83, vb, va], [Color(color, 0), Color(color, 0.8), Color(color, 0.8)])
+	for i in 10:
+		var angle = TAU * float(i) / 10.0 + 0.18
+		var dir = Vector3(cos(angle), sin(angle), 0)
+		var side = Vector3(-dir.y, dir.x, 0)
+		_gradient_triangle(mesh, [dir * 0.88 - side * 0.025, dir * 1.52, dir * 0.88 + side * 0.025], [Color(color, 0.65), Color(color, 0), Color.WHITE])
+	mesh.surface_end()
+	_spike_shock = MeshInstance3D.new()
+	_spike_shock.mesh = mesh
+	_spike_shock.material_override = _particle_material
+	_spike_shock.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_spike_shock.layers = 1
+	add_child(_spike_shock)
 
 func _polygon(mesh: ImmediateMesh, points: Array, color: Color) -> void:
 	var center := Vector3.ZERO
@@ -362,12 +396,17 @@ func _process(_delta: float) -> void:
 			var center = camera.unproject_position(global_position)
 			var pixels_per_metre = center.distance_to(camera.unproject_position(global_position + camera.global_basis.x.normalized()))
 			if pixels_per_metre > 0.01:
-				_screen_scale = clampf(lerpf(28.0, 40.0, strength) / (pixels_per_metre * 0.50), 0.65, 3.2)
+				var target_pixels = lerpf(28.0, 40.0, strength) * (1.35 if spike else 1.0)
+				_screen_scale = clampf(target_pixels / (pixels_per_metre * 0.50), 0.65, 3.2)
 	var progress = age / _lifetime
 	var launch = smoothstep(0.0, 0.17, progress)
 	var expand = smoothstep(0.02, 0.88, progress)
 	scale = Vector3.ONE * _screen_scale * lerpf(0.86, 1.08, expand)
 	var fade = 1.0 - smoothstep(0.43, 1.0, progress)
+	if is_instance_valid(_spike_shock):
+		_spike_shock.scale = Vector3.ONE * lerpf(0.42, 1.9, smoothstep(0.0, 0.62, progress))
+		_spike_shock.rotation.z = -0.28 + progress * 0.22
+		_spike_shock.visible = progress < 0.68
 	_material.albedo_color.a = lerpf(0.78, 1.0, strength) * fade
 	_particle_material.albedo_color.a = lerpf(0.85, 1.0, strength) * fade
 	_glow_material.albedo_color.a = lerpf(0.48, 0.72, strength) * fade * launch

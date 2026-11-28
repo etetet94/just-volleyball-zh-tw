@@ -164,6 +164,7 @@ func _process(_delta: float) -> void:
 	_next_spawn = now + 850
 	var glyph = _glyph_script.new()
 	glyph.style = _preview_style
+	glyph.spike = bool(options.get("spike_showcase", true))
 	glyph.strength = float(options.get("effect_intensity", 0.65))
 	glyph.tint = Color("79baff")
 	_world.add_child(glyph)

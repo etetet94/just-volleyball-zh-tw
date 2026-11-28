@@ -1,4 +1,3 @@
-467d5e0b8aafba8bbb630565e24c3809e64e7dd764e9fc882f7b3bcd100ec17e  JustVolleyball-zhTW-v1.2.1.zip
-ef2e98c071c74efcf8387544fa831fcf69a3402440e8a1c37433732eed3d0a29  JustVolleyball-zhTW-v1.2.1-Promo.mp4
-519775c0afe691f6243fb7e822a350c82c4fc67a36879acbd30b5057ab53662e  Promo-Cover.png
-4f2f2ab6990f122534d89de65cca34b4b4b5c3f733f221b7ccb0ca838e7dd224  JustVolleyball-zhTW-v1.2.1-Clips.zip
+4e3b557bbab8c16aab336e303dfbc2b4964c8d75c08a2606581a760fe168922b  JustVolleyball-zhTW-v1.3.0.zip
+308eb4fa3fae9b69ebfbcfc42c91837ed33edd4251bbbe03f2144202e8b4e52e  Spike-Trails-Preview.mp4
+72f515b37bbdc80cd30913240d7823f5801e2f4dabc05c614461645b459fe892  INSTALL-AND-CHANGELOG-zhTW.md
