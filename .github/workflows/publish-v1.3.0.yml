@@ -1,0 +1,136 @@
+name: Publish v1.3.0
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/publish-v1.3.0.yml]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-v1.3.0
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'etetet94/just-volleyball-zh-tw' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_REPO: etetet94/just-volleyball-zh-tw
+      TAG: v1.3.0
+      RELEASE_COMMIT: 10d648c08dd867bbb3f9dd51da0b774a1cf3c704
+      SOURCE_COMMIT: 83e137409063c12576609258dd6633997ad1a30e
+      STAGING_BRANCH: codex-publish-v1.3.0-media
+      PACKAGE: JustVolleyball-zhTW-v1.3.0.zip
+      EXPECTED_SHA256: 4e3b557bbab8c16aab336e303dfbc2b4964c8d75c08a2606581a760fe168922b
+
+    steps:
+      - name: Download and verify the frozen install package and media
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://raw.githubusercontent.com/$GH_REPO/$RELEASE_COMMIT"
+          curl --fail --location --retry 3 --retry-all-errors --retry-delay 2 "$base/downloads/$PACKAGE" --output "$PACKAGE"
+          curl --fail --location --retry 3 --retry-all-errors --retry-delay 2 "$base/downloads/SHA256SUMS.txt" --output SHA256SUMS.txt
+          curl --fail --location --retry 3 --retry-all-errors --retry-delay 2 "$base/docs/releases/v1.3.0.md" --output INSTALL-AND-CHANGELOG-zhTW.md
+          curl --fail --location --retry 3 --retry-all-errors --retry-delay 2 "https://raw.githubusercontent.com/$GH_REPO/$SOURCE_COMMIT/.release-upload/$TAG/manifest.json" --output media-manifest.json
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, re, subprocess
+          manifest=json.loads(pathlib.Path('media-manifest.json').read_text())
+          assert manifest['version']=='v1.3.0'
+          assert manifest['repository']==os.environ['GH_REPO']
+          base=f"https://raw.githubusercontent.com/{os.environ['GH_REPO']}/{os.environ['SOURCE_COMMIT']}"
+          names=[]
+          for asset in manifest['artifacts']:
+              name=asset['name']
+              assert re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]+',name)
+              assert name not in names
+              assert 0 < asset['size'] < 100*1024*1024
+              names.append(name)
+              digest=hashlib.sha256()
+              size=0
+              with open(name,'wb') as output:
+                  for part in asset['parts']:
+                      assert re.fullmatch(r'\.release-upload/v1\.3\.0/[0-9]+/[0-9]{5}\.part',part['path'])
+                      subprocess.run(['curl','--fail','--location','--retry','3','--retry-all-errors','--retry-delay','2',base+'/'+part['path'],'--output','media.part'],check=True)
+                      data=pathlib.Path('media.part').read_bytes()
+                      assert len(data)==part['size']
+                      assert hashlib.sha256(data).hexdigest()==part['sha256']
+                      output.write(data)
+                      digest.update(data)
+                      size+=len(data)
+              assert size==asset['size']
+              assert digest.hexdigest()==asset['sha256']
+          pathlib.Path('release-assets.txt').write_text('\n'.join([os.environ['PACKAGE'],'SHA256SUMS.txt','INSTALL-AND-CHANGELOG-zhTW.md']+names)+'\n')
+          PY
+          tr -d '\r' < SHA256SUMS.txt | sha256sum --check -
+          printf '%s  %s\n' "$EXPECTED_SHA256" "$PACKAGE" | sha256sum --check -
+
+      - name: Create, verify, and publish the v1.3.0 release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$GH_REPO" \
+              --target "$RELEASE_COMMIT" --draft \
+              --title 'v1.3.0｜殺球能量軌跡、華麗得分演出與犯規說明' \
+              --notes-file INSTALL-AND-CHANGELOG-zhTW.md
+          fi
+          draft="$(gh release view "$TAG" --repo "$GH_REPO" --json isDraft --jq '.isDraft')"
+          while IFS= read -r file; do
+            assets="$(gh release view "$TAG" --repo "$GH_REPO" --json assets --jq '.assets[].name')"
+            if printf '%s\n' "$assets" | grep -Fqx "$file"; then
+              mkdir -p remote-assets
+              gh release download "$TAG" --repo "$GH_REPO" --pattern "$file" --dir remote-assets
+              cmp "$file" "remote-assets/$file"
+            elif [ "$draft" = true ]; then
+              gh release upload "$TAG" "$file" --repo "$GH_REPO"
+            else
+              echo "Existing published release is missing $file; refusing to modify it."
+              exit 1
+            fi
+          done < release-assets.txt
+
+          gh api "repos/$GH_REPO/releases/tags/$TAG" > release-before-publish.json
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib
+          release=json.loads(pathlib.Path('release-before-publish.json').read_text())
+          assert release['target_commitish']==os.environ['RELEASE_COMMIT']
+          assets={a['name']:a for a in release['assets']}
+          for name in pathlib.Path('release-assets.txt').read_text().splitlines():
+              data=pathlib.Path(name).read_bytes()
+              assert assets[name]['state']=='uploaded'
+              assert assets[name]['size']==len(data)
+              assert assets[name]['digest']=='sha256:'+hashlib.sha256(data).hexdigest()
+          PY
+          if [ "$draft" = true ]; then
+            gh release edit "$TAG" --repo "$GH_REPO" \
+              --notes-file INSTALL-AND-CHANGELOG-zhTW.md --draft=false --latest
+          fi
+          gh release view "$TAG" --repo "$GH_REPO" --json url,tagName,isDraft,assets
+
+      - name: Remove the temporary media branch after verification
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$STAGING_BRANCH" = codex-publish-v1.3.0-media
+          if gh api "repos/$GH_REPO/git/ref/heads/$STAGING_BRANCH" > media-ref.json 2> media-ref-error.txt; then
+            actual="$(python3 -c 'import json; print(json.load(open("media-ref.json"))["object"]["sha"])')"
+            if [ "$actual" != "$SOURCE_COMMIT" ]; then
+              echo 'Temporary media branch changed; refusing to delete another commit.'
+              exit 1
+            fi
+            gh api --method DELETE "repos/$GH_REPO/git/refs/heads/$STAGING_BRANCH"
+          elif grep -Fq 'HTTP 404' media-ref-error.txt; then
+            echo 'Temporary media branch is already absent.'
+          else
+            cat media-ref-error.txt
+            exit 1
+          fi
+
